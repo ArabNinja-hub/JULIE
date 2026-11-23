@@ -4,6 +4,28 @@ import * as THREE from 'three'
 import { SUN_DIRECTION } from '../../lib/terrain'
 
 /**
+ * Shadow bias, derived rather than guessed.
+ *
+ * A shadow map stores depth at grid resolution, so along the light
+ * direction it can be wrong by roughly `texelSize / tan(sunElevation)`.
+ * If that error is larger than the normal bias, the shadow test fails on
+ * lit ground and the surface breaks up into stripes and speckle — shadow
+ * acne.
+ *
+ * This is why lowering the sun broke the ground: at 24° the requirement
+ * was ~0.2 m, at 14° it is ~0.36 m, and the bias was still 0.045.
+ */
+function shadowNormalBias(extent, mapSize) {
+  const texel = (extent * 2) / mapSize
+  const tanElevation = Math.max(
+    0.12,
+    SUN_DIRECTION.y / Math.hypot(SUN_DIRECTION.x, SUN_DIRECTION.z)
+  )
+  // 1.35 leaves a small safety margin over the worst-case texel error
+  return Math.min(0.6, (texel / tanElevation) * 1.35)
+}
+
+/**
  * The lunar light rig.
  *
  * The Moon has no atmosphere: sunlight is intensely directional, the
@@ -56,15 +78,22 @@ export default function LightRig({ isMobile }) {
   })
 
   const size = isMobile ? 1024 : 2048
-  const extent = isMobile ? 70 : 95
+  // A tighter shadow frustum is the cheapest accuracy win available: halving
+  // the extent quarters the texel area, so shadows are sharper AND the
+  // required bias drops.
+  const extent = isMobile ? 58 : 72
+  const normalBias = shadowNormalBias(extent, size)
 
   return (
     <>
-      {/* The sun: hard, low, and the only real light source */}
+      {/* The sun: hard, low, and the only real light source.
+          Intensity raised and the angle dropped — a high sun flattens a
+          surface into paint, because every slope receives nearly the same
+          light. At a lower angle the same terrain reads as land. */}
       <directionalLight
         ref={sun}
-        intensity={4.6}
-        color="#fffdf8"
+        intensity={5.0}
+        color="#fffaf2"
         castShadow
         shadow-mapSize-width={size}
         shadow-mapSize-height={size}
@@ -73,17 +102,19 @@ export default function LightRig({ isMobile }) {
         shadow-camera-top={extent}
         shadow-camera-bottom={-extent}
         shadow-camera-near={1}
-        shadow-camera-far={400}
-        shadow-bias={-0.0004}
-        shadow-normalBias={0.045}
+        shadow-camera-far={420}
+        shadow-bias={-0.0002}
+        shadow-normalBias={normalBias}
       />
       <object3D ref={target} />
 
-      {/* Earthshine — a trace of cool bounce, nothing more */}
+      {/* Earthshine — a trace of cool bounce, nothing more. Slightly up
+          from before: pure black shadows swallow the terrain silhouette,
+          and a whisper of blue is physically real when Earth is high. */}
       <directionalLight
         ref={follower}
         position={[-1, 0.35, -0.6]}
-        intensity={0.1}
+        intensity={0.17}
         color="#7f9dd6"
       />
     </>

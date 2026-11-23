@@ -22,7 +22,7 @@ export const DESTINATIONS = [
       'The mare’s basalt is roughly 3.9 billion years old.',
       'With no wind or water, footprints in the regolith can last for millions of years.',
     ],
-    spawn: { x: -78, z: -128, lookX: -100, lookZ: -100 },
+    spawn: { x: -50, z: -59, lookX: -100, lookZ: -100 },
   },
   {
     id: 'copernicus',
@@ -37,7 +37,7 @@ export const DESTINATIONS = [
       'Its central peak rises about 1.2 km above the crater floor.',
       'Formed roughly 800 million years ago by an asteroid about 1 km wide.',
     ],
-    spawn: { x: 84, z: -84, lookX: 100, lookZ: -100 },
+    spawn: { x: 118, z: -170, lookX: 100, lookZ: -100 },
   },
   {
     id: 'tycho',
@@ -52,7 +52,7 @@ export const DESTINATIONS = [
       'Formed about 108 million years ago, young by lunar standards.',
       'Apollo 17 astronauts collected samples from Tycho ejecta in 1972.',
     ],
-    spawn: { x: -84, z: 58, lookX: -100, lookZ: 100 },
+    spawn: { x: -77, z: 28, lookX: -100, lookZ: 100 },
   },
   {
     id: 'southpole',
@@ -67,7 +67,7 @@ export const DESTINATIONS = [
       'In 2009, NASA’s LCROSS impactor confirmed water ice in Cabeus crater.',
       'NASA’s Artemis programme aims to return astronauts to this region.',
     ],
-    spawn: { x: 106, z: 164, lookX: 100, lookZ: 100 },
+    spawn: { x: 158, z: 134, lookX: 100, lookZ: 100 },
   },
 ]
 

@@ -8,6 +8,65 @@ import { makeEarthTexture, SUN_DIRECTION } from '../../lib/terrain'
  * Deep-space backdrop: a dense starfield that follows the camera (so it
  * reads as infinitely distant), plus Earth hanging in the lunar sky.
  */
+/**
+ * A very subtle horizon gradient.
+ *
+ * There is no atmosphere on the Moon, so there is no sky glow in the
+ * everyday sense — but a flat black field meeting lit ground leaves the
+ * horizon with no depth at all. A faint warm lift toward the sunward
+ * horizon, and a cooler one opposite, costs nothing and makes the ground
+ * read as extending into a place rather than ending at a wall of black.
+ */
+function HorizonGlow() {
+  const { camera } = useThree()
+  const mesh = useRef()
+
+  useFrame(() => {
+    if (!mesh.current) return
+    mesh.current.position.set(camera.position.x, camera.position.y, camera.position.z)
+  })
+
+  return (
+    <mesh ref={mesh} renderOrder={-1}>
+      <sphereGeometry args={[520, 24, 16]} />
+      <shaderMaterial
+        side={THREE.BackSide}
+        depthWrite={false}
+        fog={false}
+        uniforms={{
+          uSun: { value: new THREE.Vector3(SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z) },
+        }}
+        vertexShader={`
+          varying vec3 vDir;
+          void main() {
+            vDir = normalize(position);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `}
+        fragmentShader={`
+          varying vec3 vDir;
+          uniform vec3 uSun;
+          void main() {
+            // Height above the horizon: 0 at the equator, 1 at the zenith
+            float up = vDir.y;
+            // Only the band just above the horizon glows
+            float band = smoothstep(-0.06, 0.02, up) * (1.0 - smoothstep(0.05, 0.42, up));
+            // Brighter toward the sun
+            float toSun = max(0.0, dot(normalize(vec3(vDir.x, 0.0, vDir.z)),
+                                       normalize(vec3(uSun.x, 0.0, uSun.z))));
+            float warm = pow(toSun, 3.0);
+
+            vec3 cool = vec3(0.012, 0.017, 0.038);
+            vec3 hot  = vec3(0.055, 0.052, 0.060);
+            vec3 col = mix(cool, hot, warm) * band;
+            gl_FragColor = vec4(col, 1.0);
+          }
+        `}
+      />
+    </mesh>
+  )
+}
+
 export default function LunarSky({ isMobile }) {
   const group = useRef()
   const earthGroup = useRef()
@@ -27,6 +86,10 @@ export default function LunarSky({ isMobile }) {
     // The star dome travels with the camera — parallax-free infinity
     if (group.current) {
       group.current.position.copy(camera.position)
+      // A slow turn of the whole dome. Standing still on the Moon, the sky
+      // should still feel alive; this is the real motion of the heavens,
+      // not a twinkle. Very slow — it must never distract from walking.
+      group.current.rotation.y += delta * 0.006
     }
     if (sunGroup.current) {
       // The Sun sits along exactly the axis the key light shines down, so
@@ -62,6 +125,8 @@ export default function LunarSky({ isMobile }) {
           speed={0.25}
         />
       </group>
+
+      <HorizonGlow />
 
       {/* The Sun. Reflected light is the only light on the Moon, so the
           disc itself is blindingly bright while the sky stays black. */}
