@@ -49,6 +49,12 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
+        with:
+          # Create the Pages site if it does not exist yet. The Pages admin
+          # API refuses app/installation tokens, which is why enabling Pages
+          # from the outside returned 403 — but this action runs with the
+          # workflow's own token and can do the enablement itself.
+          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
