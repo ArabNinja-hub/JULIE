@@ -1,0 +1,109 @@
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import Starfield from './components/Starfield'
+import Navbar from './components/Navbar'
+import Hero from './components/Hero'
+import AudioToggle from './components/AudioToggle'
+import RegionScroll from './components/RegionScroll'
+import HiggsfieldLayer, {
+  useHiggsfieldAsset,
+} from './components/HiggsfieldLayer'
+import {
+  About,
+  ExplorationIntro,
+  Observations,
+  Appreciation,
+  CornerSection,
+  Footer,
+} from './components/Sections'
+import { useIsMobile, useWebGL, prefersReducedMotion } from './lib/hooks'
+
+// The exploration world is heavy — it only loads when she asks for it.
+const LunarExperience = lazy(() => import('./components/explore/LunarExperience'))
+
+export default function App() {
+  const isMobile = useIsMobile()
+  const webgl = useWebGL()
+  const hasCinematic = useHiggsfieldAsset()
+
+  const [exploring, setExploring] = useState(false)
+  const [cinematicOpen, setCinematicOpen] = useState(false)
+  const [pendingDestination, setPendingDestination] = useState(null)
+  const reducedMotion = useRef(prefersReducedMotion())
+
+  /* Warm the exploration bundle shortly after load, so "Explore the Moon"
+     feels instant — without ever blocking the first paint. */
+  useEffect(() => {
+    if (!webgl) return
+    const t = setTimeout(() => {
+      import('./components/explore/LunarExperience')
+    }, 2600)
+    return () => clearTimeout(t)
+  }, [webgl])
+
+  const openExplore = useCallback(
+    (destinationId = null) => {
+      // Without WebGL there is nothing to walk on — never open a blank world
+      if (!webgl) {
+        document.getElementById('explore')?.scrollIntoView({ behavior: 'smooth' })
+        return
+      }
+      setPendingDestination(destinationId)
+      setExploring(true)
+    },
+    [webgl]
+  )
+
+  const closeExplore = useCallback(() => {
+    setExploring(false)
+    setPendingDestination(null)
+  }, [])
+
+  return (
+    <>
+      <Starfield paused={exploring} />
+      <div className="nebula" aria-hidden="true" />
+
+      <Navbar onExplore={() => openExplore()} />
+      <AudioToggle />
+
+      <main>
+        <Hero
+          isMobile={isMobile}
+          onExplore={() => openExplore()}
+          hasCinematic={hasCinematic}
+          onPlayCinematic={() => setCinematicOpen(true)}
+          exploring={exploring}
+        />
+        <ExplorationIntro
+          onExplore={() => openExplore()}
+          webgl={webgl}
+          isMobile={isMobile}
+        />
+        <About />
+        <Observations />
+        <RegionScroll onExploreAt={openExplore} />
+        <Appreciation />
+        <CornerSection />
+      </main>
+      <Footer />
+
+      {hasCinematic && (
+        <HiggsfieldLayer
+          open={cinematicOpen}
+          onClose={() => setCinematicOpen(false)}
+        />
+      )}
+
+      {exploring && webgl && (
+        <Suspense fallback={null}>
+          <LunarExperience
+            onExit={closeExplore}
+            isMobile={isMobile}
+            reducedMotion={reducedMotion.current}
+            initialDestination={pendingDestination}
+          />
+        </Suspense>
+      )}
+    </>
+  )
+}
