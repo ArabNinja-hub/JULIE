@@ -58,11 +58,47 @@ const CEILING = 190 // above the highest terrain, in metres
 const TAKEOFF_CLEARANCE = 0.6
 const TAKEOFF_GRACE = 0.5 // seconds during which landing cannot trigger
 
+/* Takeoff climbs to this height on its own.
+ *
+ * Without it, tapping "Lift off" produced a 2.8 m hover and then nothing:
+ * the initial impulse decayed before a touch user could reach the climb
+ * control, and on a phone there is no climb key at all. A single tap must
+ * be enough to get somewhere worth looking from, so takeoff carries her up
+ * to a viewing altitude and then holds. Climb and descend still work from
+ * there in either direction.
+ */
+const TAKEOFF_HEIGHT = 42
+
 /* The last few metres are flown, not dropped. Below FLARE_HEIGHT the
    descent rate is limited in proportion to the height remaining, so the
    touchdown speed is FLARE_MIN_SPEED instead of a 32 km/h impact. */
 const FLARE_HEIGHT = 14
 const FLARE_MIN_SPEED = 0.16
+
+/* How hard the smoothed ground height is pulled up to the real surface
+   when the real surface rises through it.
+ *
+ * The rate has to scale with how fast she covers terrain, because the lag
+ * is (speed / rate) metres of ground. Walking at 4.2 m/s:
+ *
+ *   18 Hz → worst clearance 1.64m, walk accel 13.1, sprint accel 30.6
+ *   30 Hz → worst clearance 1.68m, walk accel 17.1, sprint accel 31.6
+ *    ∞    (hard clamp) → 1.72m, but walk accel 24.5
+ *
+ * 18 Hz removes almost all of the underground error for free on foot.
+ *
+ * Flying is different: drift is 16 m/s, so the same rate lags nearly four
+ * times as much ground. Measured landing while drifting, over 32 headings
+ * from the Copernicus slope:
+ *
+ *    18 Hz → 1.23m (underground)     40 Hz → 1.62m (still underground)
+ *    80 Hz → 1.75m (clear)
+ *
+ * Flight gets the stiff value. Nothing is felt in a slow vertical landing,
+ * because the correction only engages when the surface rises through her.
+ */
+const GROUND_CORRECT_RATE = 18
+const FLY_GROUND_CORRECT_RATE = 80
 
 /**
  * First-person lunar traversal.
@@ -104,6 +140,9 @@ export default function FirstPersonControls({ api, onStep, isMobile }) {
     alt: 0,
     velY: 0, // vertical velocity, m/s
     flyInput: 0, // touch/UI vertical axis: -1 down, 0 hold, +1 up
+    // Height the automatic takeoff climb is aiming for. Cleared the moment
+    // the user gives any vertical input, so it never fights a decision.
+    climbingTo: 0,
     autoLand: false,
     // Grace period after takeoff. Starting from rest at alt 0 means the
     // landing test (alt <= 0) would be true on the very first frame and
@@ -158,7 +197,8 @@ export default function FirstPersonControls({ api, onStep, isMobile }) {
         // Clear the ground at once. Even starting from exactly 0, the
         // camera must be airborne before the landing test can be reached.
         s.alt = Math.max(TAKEOFF_CLEARANCE, startAlt)
-        s.velY = FLY_RISE * 0.55 // an initial lift, then it is all control
+        s.velY = FLY_RISE * 0.55 // an initial lift, then the climb carries
+        s.climbingTo = startAlt > 0 ? startAlt : TAKEOFF_HEIGHT
         s.takeoffGrace = TAKEOFF_GRACE
         s.gait = 0
         s.bobAmount = 0
@@ -217,6 +257,7 @@ export default function FirstPersonControls({ api, onStep, isMobile }) {
           s.autoLand = false
           s.alt = TAKEOFF_CLEARANCE
           s.velY = FLY_RISE * 0.55
+          s.climbingTo = TAKEOFF_HEIGHT
           s.takeoffGrace = TAKEOFF_GRACE
           s.gait = 0
           s.bobAmount = 0
@@ -375,11 +416,28 @@ export default function FirstPersonControls({ api, onStep, isMobile }) {
        nothing drifts.
     ================================================================ */
     if (s.flying) {
-      // Ground under her, smoothed the same way as on foot so the
-      // altitude reading does not jitter over rocks.
+      /* Ground under her.
+       *
+       * The eye height is smoothed so the altitude reading does not
+       * jitter over rocks — but it must never be allowed to *lead* the
+       * real surface while descending. Drifting over rising terrain, a
+       * lagging estimate says she is higher than she is, and landing
+       * drives the camera into the hillside: measured at 2 m underground
+       * on the Copernicus slopes.
+       *
+       * So the smoothed estimate is clamped to the real ground whenever
+       * the real ground is above it. She can float over a dip, but can
+       * never be below the rock.
+       */
       const ground = terrainHeight(s.pos.x, s.pos.z)
       if (s.eye === null) s.eye = ground
       s.eye += (ground - s.eye) * Math.min(1, 6 * delta)
+      // Same anti-underground correction as the walk, but far stiffer:
+      // drift is 16 m/s against a walking 4.2, so the ground moves under
+      // her four times faster and a walking-rate correction buries her.
+      if (ground > s.eye) {
+        s.eye += (ground - s.eye) * Math.min(1, FLY_GROUND_CORRECT_RATE * delta)
+      }
 
       /* Vertical input. Space / E climbs, Shift / Q descends, and the
          auto-land flag asks for a descent with no input. */
@@ -388,6 +446,16 @@ export default function FirstPersonControls({ api, onStep, isMobile }) {
       if (k.has('shift') || k.has('q')) want -= 1
       // The HUD's hold-to-climb buttons drive the same axis
       if (want === 0 && s.flyInput !== 0) want = s.flyInput
+
+      /* Any deliberate vertical input cancels the automatic takeoff climb.
+         A command from the user always wins over the scripted ascent. */
+      if (want !== 0) s.climbingTo = 0
+
+      if (want === 0 && s.climbingTo > 0) {
+        if (s.alt < s.climbingTo - 0.5) want = 1
+        else s.climbingTo = 0
+      }
+
       if (s.autoLand && want === 0) want = -1
 
       // Blend towards the requested direction rather than switching:
@@ -578,6 +646,25 @@ export default function FirstPersonControls({ api, onStep, isMobile }) {
     const base = gap > 0 ? 2.6 : 3.4 + falloff * 2.0
     const followRate = (base + magnitude * 4.2) * delta
     s.eye += gap * Math.min(1, followRate)
+
+    /* Never let the smoothing put the feet through the floor.
+     *
+     * The follow above deliberately lags — that is what removes the jolt
+     * from rough ground. But a lagging estimate on a fast descent means the
+     * real surface rises through it and the camera ends up below the rock:
+     * measured at 1.27 m above ground while sprinting downhill, half a metre
+     * of the body inside the hill.
+     *
+     * A hard clamp fixes that but *reintroduces the jolt it was meant to
+     * avoid* — a one-frame velocity discontinuity, 24 m/s² while walking.
+     * So this is a fast ease rather than a clamp: strong enough that she
+     * never gets meaningfully inside the ground (worst case 4 cm of toe
+     * dip at full sprint), gentle enough to add nothing to the acceleration
+     * budget at sprint speeds.
+     */
+    if (ground > s.eye) {
+      s.eye += (ground - s.eye) * Math.min(1, GROUND_CORRECT_RATE * delta)
+    }
 
     /* --- gait ---------------------------------------------------------
        A walk cycle, not a sine wave on the camera height. The amount of

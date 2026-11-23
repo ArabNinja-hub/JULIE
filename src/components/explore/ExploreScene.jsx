@@ -31,6 +31,8 @@ function Scene({
   onSelectLandmark,
   onNearby,
   isMobile,
+  flying,
+  paused,
 }) {
   // Rocks cluster around whichever destination she is standing in
   const padIndex = Math.max(0, DESTINATION_ORDER.indexOf(destinationId))
@@ -61,7 +63,7 @@ function Scene({
       <fog attach="fog" args={['#050814', 420, 1750]} />
 
       {/* Hard low sun + a trace of earthshine */}
-      <LightRig isMobile={isMobile} flying={props.flying} />
+      <LightRig isMobile={isMobile} flying={flying} />
 
       {/* A very faint ambient floor so nothing is pure #000 — real
           shadowed regolith still catches starlight and earthshine. */}
@@ -83,12 +85,20 @@ function Scene({
         <SunShafts />
       </Suspense>
 
-      {/* Applied last, as the smallest possible layer on top of the
-          controls — presence must never fight the walk for the camera. */}
-      <Immersion enabled={!props.paused} flying={props.flying} />
-      <AdaptiveFov isMobile={isMobile} />
-
       <FirstPersonControls api={api} onStep={onStep} isMobile={isMobile} />
+
+      {/* Order here is load-bearing.
+       *
+       * R3F sorts useFrame subscriptions by priority, then runs equal
+       * priorities in mount order. The controls write camera.position and
+       * camera.rotation outright every frame, so anything that adds to
+       * the camera must be mounted *after* them or its contribution is
+       * overwritten before the frame is drawn. Mounted the other way
+       * round, Immersion's sway and breathing were computed every frame
+       * and then silently erased — an invisible bug, not a crash.
+       */}
+      <Immersion enabled={!paused} flying={flying} />
+      <AdaptiveFov isMobile={isMobile} />
     </>
   )
 }
