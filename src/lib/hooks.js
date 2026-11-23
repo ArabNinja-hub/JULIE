@@ -1,11 +1,17 @@
-import { useEffect, useState } from 'react'
-import { subscribeAudio, isAudioEnabled } from './audio'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+import {
+  subscribeSong,
+  getSongState,
+  getServerSongState,
+} from './song'
 
-/** Re-renders when the global ambient-audio state changes. */
-export function useAudioEnabled() {
-  const [on, setOn] = useState(isAudioEnabled)
-  useEffect(() => subscribeAudio(setOn), [])
-  return on
+/**
+ * Subscribes to the global song state. Because the audio element lives
+ * outside React, this hook can be mounted anywhere — and remounted on
+ * navigation — without ever interrupting playback.
+ */
+export function useSong() {
+  return useSyncExternalStore(subscribeSong, getSongState, getServerSongState)
 }
 
 /** True when the viewport is narrow enough to count as a phone. */

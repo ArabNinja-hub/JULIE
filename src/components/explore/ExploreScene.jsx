@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
-import Terrain, { Rocks } from './Terrain'
+import Terrain, { Rocks, Pebbles } from './Terrain'
 import LightRig from './LightRig'
 import FirstPersonControls from './FirstPersonControls'
 import Landmarks from './Landmarks'
@@ -29,22 +29,27 @@ function Scene({
 }) {
   return (
     <>
-      <color attach="background" args={['#04060f']} />
-      {/* Distance haze: gives the horizon depth without swallowing Earth */}
-      <fog attach="fog" args={['#070c1a', 120, 520]} />
+      <color attach="background" args={['#02030a']} />
 
-      {/* Low raking sun — the whole mood comes from this */}
+      {/*
+        There is no atmosphere on the Moon, so there is no aerial haze.
+        Distant terrain stays almost as crisp as near terrain — only a
+        whisper of fog keeps the far edge of the world from looking like
+        a hard cut, and it is pushed far back.
+      */}
+      <fog attach="fog" args={['#050814', 260, 620]} />
+
+      {/* Hard low sun + a trace of earthshine */}
       <LightRig isMobile={isMobile} />
 
-      {/* Cool skylight — Earthshine bouncing off the ground */}
-      <hemisphereLight args={['#8fb0ff', '#161d33', 1.1]} />
-
-      {/* Lavender rim from the opposite side */}
-      <directionalLight position={[-140, 40, -120]} intensity={0.75} color="#a78bfa" />
+      {/* A very faint ambient floor so nothing is pure #000 — real
+          shadowed regolith still catches starlight and earthshine. */}
+      <ambientLight intensity={0.045} color="#5a6b96" />
 
       <Suspense fallback={<Loading />}>
-        <Terrain segments={isMobile ? 128 : 200} />
-        <Rocks count={isMobile ? 150 : 300} />
+        <Terrain segments={isMobile ? 160 : 256} />
+        <Rocks count={isMobile ? 260 : 520} />
+        <Pebbles count={isMobile ? 140 : 260} />
         <Landmarks
           destinationId={destinationId}
           foundIds={foundLandmarks}

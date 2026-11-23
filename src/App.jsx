@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import Starfield from './components/Starfield'
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
-import AudioToggle from './components/AudioToggle'
+import MusicPlayer from './components/MusicPlayer'
 import RegionScroll from './components/RegionScroll'
 import HiggsfieldLayer, {
   useHiggsfieldAsset,
@@ -58,18 +58,32 @@ export default function App() {
     setPendingDestination(null)
   }, [])
 
+  /**
+   * "ENTER JULIET'S UNIVERSE" — the music has already been started by the
+   * button itself (it must be, to satisfy browser gesture rules); this
+   * only opens the journey on the Moon.
+   */
+  const enterUniverse = useCallback(() => {
+    openExplore()
+  }, [openExplore])
+
   return (
     <>
       <Starfield paused={exploring} />
       <div className="nebula" aria-hidden="true" />
 
-      <Navbar onExplore={() => openExplore()} />
-      <AudioToggle />
+      {/* First stop in the tab order: jump past the navigation. */}
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
 
-      <main>
+      <Navbar onExplore={() => openExplore()} />
+      <MusicPlayer />
+
+      <main id="main">
         <Hero
           isMobile={isMobile}
-          onExplore={() => openExplore()}
+          onEnter={enterUniverse}
           hasCinematic={hasCinematic}
           onPlayCinematic={() => setCinematicOpen(true)}
           exploring={exploring}

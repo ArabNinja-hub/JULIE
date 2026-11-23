@@ -4,30 +4,31 @@ import {
   WORLD,
   terrainHeight,
   terrainColor,
-  makeGroundTexture,
+  makeRegolithNormalTexture,
+  makeRegolithRoughnessTexture,
 } from '../../lib/terrain'
 
 /**
  * The lunar surface.
  *
- * One continuous 400 × 400 heightfield holding all four regions, coloured
- * per-vertex (dark mare, bright Tycho rays, shadowed polar patches).
- * Geometry is generated once and disposed on unmount — no leaks.
+ * One continuous heightfield covering all four regions, coloured per
+ * vertex with true (dark) regolith albedo. On top of that sit two tiling
+ * detail maps — a fine normal map and a roughness map — which supply the
+ * centimetre-scale texture the vertex mesh can never hold. The result
+ * catches the low sun as dry, powdery ground rather than painted glass.
+ *
+ * Geometry and textures are built once and disposed on unmount.
  */
-export default function Terrain({ segments = 176 }) {
+export default function Terrain({ segments = 200 }) {
   const geometry = useMemo(() => {
-    const g = new THREE.PlaneGeometry(
-      WORLD.size,
-      WORLD.size,
-      segments,
-      segments
-    )
+    const size = WORLD.size
+    const g = new THREE.PlaneGeometry(size, size, segments, segments)
     g.rotateX(-Math.PI / 2)
 
     const pos = g.attributes.position
     const count = pos.count
     const n = segments + 1
-    const step = WORLD.size / segments
+    const step = size / segments
 
     const heights = new Float32Array(count)
     const xs = new Float32Array(count)
@@ -44,7 +45,7 @@ export default function Terrain({ segments = 176 }) {
     }
     pos.needsUpdate = true
 
-    // Per-vertex colour, brightness driven by local slope
+    // Per-vertex colour from albedo and local slope
     const colors = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
       const ix = i % n
@@ -55,7 +56,7 @@ export default function Terrain({ segments = 176 }) {
       const hD = heights[Math.min(n - 1, iy + 1) * n + ix]
       const slope = Math.min(
         1,
-        (Math.abs(hR - hL) + Math.abs(hD - hU)) / (step * 1.6)
+        (Math.abs(hR - hL) + Math.abs(hD - hU)) / (step * 1.7)
       )
       const [r, gg, b] = terrainColor(xs[i], zs[i], slope)
       colors[i * 3] = r
@@ -69,31 +70,33 @@ export default function Terrain({ segments = 176 }) {
     return g
   }, [segments])
 
-  const groundTexture = useMemo(() => {
-    const tex = new THREE.CanvasTexture(makeGroundTexture())
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-    tex.repeat.set(90, 90)
-    tex.anisotropy = 4
-    tex.colorSpace = THREE.SRGBColorSpace
-    return tex
-  }, [])
+  const normalMap = useMemo(
+    () => makeRegolithNormalTexture(256),
+    []
+  )
+  const roughnessMap = useMemo(
+    () => makeRegolithRoughnessTexture(256),
+    []
+  )
 
   useEffect(
     () => () => {
       geometry.dispose()
-      groundTexture.dispose()
+      normalMap.dispose()
+      roughnessMap.dispose()
     },
-    [geometry, groundTexture]
+    [geometry, normalMap, roughnessMap]
   )
 
   return (
     <mesh geometry={geometry} receiveShadow castShadow>
       <meshStandardMaterial
         vertexColors
-        map={groundTexture}
+        normalMap={normalMap}
+        normalScale={new THREE.Vector2(0.45, 0.45)}
+        roughnessMap={roughnessMap}
         roughness={0.97}
-        metalness={0.02}
-        color="#dfe4f2"
+        metalness={0}
         dithering
       />
     </mesh>
@@ -110,35 +113,151 @@ function rng(seed) {
   }
 }
 
-export function Rocks({ count = 260 }) {
-  const { geometry, matrices } = useMemo(() => {
-    const rand = rng(20240720)
+/**
+ * Loose rock, from pebbles to house-sized boulders.
+ *
+ * Real lunar terrain is littered with ejecta; bare ground reads as fake.
+ * These are instanced from three irregular geometries so the count stays
+ * cheap while the variety does not look repeated. Each rock is sunk
+ * slightly into the ground so none appear to float.
+ */
+export function Rocks({ count = 300, seed = 20240720 }) {
+  const rocks = useMemo(() => {
+    const rand = rng(seed)
     const dummy = new THREE.Object3D()
     const list = []
 
     let guard = 0
-    while (list.length < count && guard < count * 40) {
+    while (list.length < count && guard < count * 60) {
       guard++
-      const x = (rand() - 0.5) * WORLD.size * 0.88
-      const z = (rand() - 0.5) * WORLD.size * 0.88
+      const x = (rand() - 0.5) * WORLD.size * 0.86
+      const z = (rand() - 0.5) * WORLD.size * 0.86
 
-      // Slope check — rocks gather on flats and crater rims, not cliffs
       const h = terrainHeight(x, z)
       const dx = terrainHeight(x + 2, z) - h
       const dz = terrainHeight(x, z + 2) - h
       const slope = Math.hypot(dx, dz) / 2
-      if (slope > 0.85 && rand() > 0.25) continue
 
-      const size = 0.35 + rand() * rand() * 3.4
-      dummy.position.set(x, h + size * 0.28, z)
-      dummy.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI)
-      dummy.scale.set(size, size * (0.55 + rand() * 0.5), size * (0.8 + rand() * 0.5))
+      // Steep ground sheds rock; flats and crater floors collect it
+      if (slope > 0.9 && rand() > 0.2) continue
+
+      // Heavy skew toward small stones, with rare large boulders
+      const t = rand()
+      const size = 0.28 + Math.pow(t, 3.2) * 5.2
+
+      // Ejecta near the big craters is denser and larger
+      const nearCopernicus =
+        Math.hypot(x - 100, z + 100) < 120 ? 1 : 0
+      const nearTycho = Math.hypot(x + 100, z - 100) < 110 ? 1 : 0
+      if ((nearCopernicus || nearTycho) && rand() > 0.55) continue
+
+      dummy.position.set(x, h - size * 0.22, z)
+      dummy.rotation.set(
+        rand() * Math.PI,
+        rand() * Math.PI * 2,
+        rand() * Math.PI
+      )
+      // Flattened, angular — not spheres
+      dummy.scale.set(
+        size * (0.7 + rand() * 0.7),
+        size * (0.4 + rand() * 0.45),
+        size * (0.7 + rand() * 0.7)
+      )
+      dummy.updateMatrix()
+      list.push({
+        matrix: dummy.matrix.clone(),
+        variant: Math.floor(rand() * 3),
+        shade: 0.055 + rand() * 0.06,
+      })
+    }
+    return list
+  }, [count, seed])
+
+  // Three irregular base shapes, split into instanced meshes
+  const variants = useMemo(() => {
+    const geoms = [
+      new THREE.DodecahedronGeometry(1, 0),
+      new THREE.IcosahedronGeometry(1, 0),
+      new THREE.DodecahedronGeometry(1, 1),
+    ]
+    // Rough up the vertices so nothing reads as a manufactured solid
+    geoms.forEach((g, gi) => {
+      const p = g.attributes.position
+      const rand = rng(900 + gi)
+      for (let i = 0; i < p.count; i++) {
+        const f = 0.74 + rand() * 0.5
+        p.setXYZ(i, p.getX(i) * f, p.getY(i) * f, p.getZ(i) * f)
+      }
+      g.computeVertexNormals()
+    })
+    return geoms
+  }, [])
+
+  useEffect(() => () => variants.forEach((g) => g.dispose()), [variants])
+
+  const byVariant = useMemo(() => {
+    const groups = [[], [], []]
+    rocks.forEach((r) => groups[r.variant].push(r))
+    return groups
+  }, [rocks])
+
+  return (
+    <group>
+      {variants.map((geo, vi) => {
+        const items = byVariant[vi]
+        if (!items.length) return null
+        return (
+          <instancedMesh
+            key={vi}
+            args={[geo, undefined, items.length]}
+            castShadow
+            receiveShadow
+            frustumCulled={false}
+            ref={(mesh) => {
+              if (!mesh) return
+              items.forEach((r, i) => mesh.setMatrixAt(i, r.matrix))
+              mesh.instanceMatrix.needsUpdate = true
+            }}
+          >
+            <meshStandardMaterial
+              color="#6e7280"
+              roughness={0.94}
+              metalness={0}
+              flatShading
+              vertexColors={false}
+            />
+          </instancedMesh>
+        )
+      })}
+    </group>
+  )
+}
+
+/**
+ * A sparse drift of fine stones right around the explorer, so the ground
+ * close to the camera is never empty. Cheap: a few hundred tiny instances
+ * that follow the camera in world space.
+ */
+export function Pebbles({ count = 220 }) {
+  const { geometry, matrices } = useMemo(() => {
+    const rand = rng(5150)
+    const dummy = new THREE.Object3D()
+    const list = []
+    const R = 46
+
+    for (let i = 0; i < count; i++) {
+      const a = rand() * Math.PI * 2
+      const d = Math.sqrt(rand()) * R
+      const x = Math.cos(a) * d
+      const z = Math.sin(a) * d
+      const size = 0.035 + Math.pow(rand(), 2) * 0.16
+      dummy.position.set(x, terrainHeight(x, z) + size * 0.2, z)
+      dummy.rotation.set(rand() * 3, rand() * 3, rand() * 3)
+      dummy.scale.setScalar(size)
       dummy.updateMatrix()
       list.push(dummy.matrix.clone())
     }
-
-    const geometry = new THREE.DodecahedronGeometry(1, 0)
-    return { geometry, matrices: list }
+    return { geometry: new THREE.TetrahedronGeometry(1, 0), matrices: list }
   }, [count])
 
   useEffect(() => () => geometry.dispose(), [geometry])
@@ -146,7 +265,6 @@ export function Rocks({ count = 260 }) {
   return (
     <instancedMesh
       args={[geometry, undefined, matrices.length]}
-      castShadow
       receiveShadow
       frustumCulled={false}
       ref={(mesh) => {
@@ -155,12 +273,7 @@ export function Rocks({ count = 260 }) {
         mesh.instanceMatrix.needsUpdate = true
       }}
     >
-      <meshStandardMaterial
-        color="#9aa1b6"
-        roughness={0.92}
-        metalness={0.06}
-        flatShading
-      />
+      <meshStandardMaterial color="#575b66" roughness={0.96} metalness={0} />
     </instancedMesh>
   )
 }

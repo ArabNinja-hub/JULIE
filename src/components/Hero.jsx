@@ -3,6 +3,7 @@ import { ChevronDown, Hand, Rocket, Play, Compass } from 'lucide-react'
 import { HERO } from '../lib/content'
 import { useWebGL } from '../lib/hooks'
 import { playUiSound } from '../lib/audio'
+import { playSong } from '../lib/song'
 
 // Code-split: the Three.js bundle loads after first paint so the
 // page (and its text) appears instantly, even on slow connections.
@@ -19,7 +20,7 @@ function FallbackMoon() {
 
 export default function Hero({
   isMobile,
-  onExplore,
+  onEnter,
   hasCinematic,
   onPlayCinematic,
   exploring = false,
@@ -27,12 +28,17 @@ export default function Hero({
   const webgl = useWebGL()
   const [entering, setEntering] = useState(false)
 
+  /**
+   * The ENTER button is the visitor's first real gesture, so it starts
+   * the song (browsers require a gesture) and reveals the journey.
+   * The music itself lives outside React and keeps playing from here on.
+   */
   const launch = () => {
     if (entering) return
     setEntering(true)
     playUiSound('warp')
-    // Let the button state paint before the heavy scene mounts
-    requestAnimationFrame(() => onExplore())
+    playSong({ fade: true })
+    onEnter?.()
     setTimeout(() => setEntering(false), 1600)
   }
 
@@ -56,17 +62,17 @@ export default function Hero({
 
         <div className="hero__actions">
           <button
-            className="btn btn--primary"
+            className="btn btn--primary btn--enter"
             onClick={launch}
             disabled={entering}
           >
             <Rocket size={16} strokeWidth={1.7} />
-            {entering ? 'Entering the Moon…' : 'Explore the Moon'}
+            {entering ? 'Entering…' : "Enter Juliet's Universe"}
           </button>
 
-          <a href="#about" className="btn btn--ghost">
+          <a href="#journey" className="btn btn--ghost">
             <Compass size={16} strokeWidth={1.7} />
-            Read the story
+            Scroll the journey
           </a>
 
           {hasCinematic && (
