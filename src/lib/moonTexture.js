@@ -31,8 +31,14 @@ function mulberry32(seed) {
 }
 
 function hash2(x, y) {
-  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453
-  return n - Math.floor(n)
+  // Integer bit-mix. Same distribution as the sin-based hash it
+  // replaces, but no transcendental call — this is the hottest function
+  // in the generator and trig here dominated texture build time.
+  let h = Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1)
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b)
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35)
+  h ^= h >>> 16
+  return (h >>> 0) / 4294967296
 }
 
 function vnoise(x, y) {
@@ -98,7 +104,7 @@ function buildCraters(rand, W, H) {
       x,
       y,
       r,
-      depth: opts.depth ?? Math.min(0.55, 0.16 + r / H) * (0.7 + rand() * 0.6),
+      depth: opts.depth ?? Math.min(0.7, 0.2 + (r / H) * 1.15) * (0.7 + rand() * 0.6),
       rim: opts.rim ?? 0.16 + rand() * 0.14,
       // Ejecta blankets on the larger impacts
       ejecta: r > H * 0.035 ? 1.1 + rand() * 0.9 : 0,
@@ -108,7 +114,7 @@ function buildCraters(rand, W, H) {
       // angular wobble of the rim, so no two craters look stamped.
       wobA: rand() * Math.PI * 2,
       wobB: rand() * Math.PI * 2,
-      wobAmt: 0.05 + rand() * 0.09,
+      wobAmt: 0.05 + rand() * 0.1 + (r / 512) * 0.14,
     })
   }
 
@@ -133,9 +139,9 @@ function buildCraters(rand, W, H) {
   // Small cratering — unevenly scattered, with clusters where a swarm fell.
   // Older, shallower craters are softened so the surface reads as
   // accumulated history rather than fresh bubble wrap.
-  for (let i = 0; i < 620; i++) {
+  for (let i = 0; i < 430; i++) {
     const t = rand()
-    const r = H * (0.005 + Math.pow(t, 2.4) * 0.022)
+    const r = H * (0.0035 + Math.pow(t, 3.1) * 0.032)
     const weathered = rand()
     push(rand() * W, rand() * H, r, {
       depth: (0.1 + rand() * 0.14) * (0.4 + weathered * 0.8),
@@ -172,7 +178,7 @@ function bucketise(craters, W, H) {
   const grid = Array.from({ length: cols * rows }, () => [])
 
   craters.forEach((c, idx) => {
-    const reach = c.r * (1 + c.ejecta) * 1.25
+    const reach = Math.max(c.r * 1.75, c.r * (1 + c.ejecta) * 1.25)
     const y0 = Math.max(0, Math.floor((c.y - reach) / cell))
     const y1 = Math.min(rows - 1, Math.floor((c.y + reach) / cell))
 
@@ -198,7 +204,10 @@ function bucketise(craters, W, H) {
 
 function craterProfile(c, dx, dy) {
   const d = Math.sqrt(dx * dx + dy * dy)
-  const reach = c.r * (1 + c.ejecta) * (1 + c.wobAmt)
+  // Cut off well beyond the rim, where the Gaussian is numerically zero.
+  // Truncating at the rim itself leaves a step in the heightfield, which
+  // shows up as a drawn-looking ring around each crater.
+  const reach = Math.max(c.r * 1.75, c.r * (1 + c.ejecta) * (1 + c.wobAmt))
   if (d > reach) return 0
 
   // Angular warp: the rim wanders in and out, never a perfect circle.
@@ -214,8 +223,13 @@ function craterProfile(c, dx, dy) {
   let h = 0
 
   if (t < 1) {
-    // Bowl: gently concave floor rising into steepening walls
-    h -= c.depth * Math.pow(1 - t * t, 0.72)
+    // Bowl. A real impact crater is a paraboloid: flat floor, walls that
+    // steepen towards the rim. The normalised profile below has a non-zero
+    // slope out at the wall, which is what makes the shading read as a
+    // bowl instead of a soft grey smudge.
+    const s = t * t
+    h -= c.depth * (1 - s) * (1 - 0.35 * s)
+
     // Central peak in the big ones
     if (c.peak > 0) {
       const p = t / 0.24
@@ -223,16 +237,18 @@ function craterProfile(c, dx, dy) {
     }
   }
 
-  // Rim: a broad soft swell that blends into the surroundings.
-  // A sharp Gaussian here produces the "drawn circle" look to avoid.
-  if (t > 0.6) {
-    const k = (t - 0.94) / 0.34
-    h += c.depth * c.rim * Math.exp(-k * k)
-  }
+  // Rim: a raised lip just outside the bowl, standing a fraction of the
+  // bowl's depth. Capped, because a rim taller than its bowl reads as a
+  // dome rather than an impact.
+  const kr = (t - 1.02) / 0.17
+  h += c.depth * Math.min(0.24, c.rim) * Math.exp(-kr * kr)
 
-  // Ejecta blanket fading out beyond the rim
-  if (c.ejecta > 0 && t > 1) {
-    h += Math.exp(-(t - 1) * 3.2) * 0.2 * c.depth
+  // Ejecta blanket fading out beyond the rim. Ramped in rather than
+  // switched on at t = 1, so there is no discontinuity to catch the light.
+  if (c.ejecta > 0 && t > 0.72) {
+    const q = Math.min(1, (t - 0.72) / 0.4)
+    const ramp = q * q * (3 - 2 * q)
+    h += Math.exp(-Math.max(0, t - 1) * 3.2) * 0.2 * c.depth * ramp
   }
 
   return h
@@ -267,20 +283,29 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
     { x: 0.78, y: 0.24, rx: 0.08, ry: 0.07, rot: 0.5 },
   ]
 
+  // Pre-rotation of each sea's ellipse, computed once.
+  const MARIA_X = MARIA.map((s) => ({ ...s, cs: Math.cos(s.rot), sn: Math.sin(s.rot) }))
+
+  // The ragged edge shared by every sea. One noise field instead of one
+  // per region — that was six periodicFbm evaluations on every pixel,
+  // and it measured as the single largest cost in the whole generator.
   const mariaAt = (u, v) => {
+    const ragged = 0.82 + periodicFbm(u, v, 11, 3) * 0.36
     let m = 0
-    for (const s of MARIA) {
+    for (let i = 0; i < MARIA_X.length; i++) {
+      const s = MARIA_X[i]
       const dx = (u - s.x) / s.rx
       const dy = (v - s.y) / s.ry
-      const cs = Math.cos(s.rot)
-      const sn = Math.sin(s.rot)
-      const rx = dx * cs - dy * sn
-      const ry = dx * sn + dy * cs
+      // Cheap rejection before any real work: everything outside the
+      // unit circle of the (already normalised) ellipse cannot contribute.
+      if (dx * dx + dy * dy > 1.44) continue
+      const rx = dx * s.cs - dy * s.sn
+      const ry = dx * s.sn + dy * s.cs
       const d = Math.sqrt(rx * rx + ry * ry)
-      // Soft, irregular edge (periodic so it never seams at the wrap)
-      const ragged = 0.82 + periodicFbm(u, v, 9 + s.x * 10, 3) * 0.36
-      const t = Math.max(0, 1 - d / ragged)
-      m = Math.max(m, t * t * (3 - 2 * t))
+      const t = 1 - d / ragged
+      if (t <= 0) continue
+      const e = t * t * (3 - 2 * t)
+      if (e > m) m = e
     }
     return m
   }
@@ -303,15 +328,18 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
       const u = x / W
       const v = y / H
 
-      // Rolling highland relief. Each octave is multiplied by `cyclic`,
-      // which vanishes smoothly at the seam and is perfectly flat there —
-      // the wrapping edge of the texture is therefore identical on both
-      // sides, and no line is visible as the moon turns.
-      const cyc = cyclic(u)
-      let h = (periodicFbm(u, v, 5.4, 5) - 0.5) * 0.09 * (0.25 + 0.75 * cyc)
-      h += (periodicFbm(u, v, 17, 3) - 0.5) * 0.03 * (0.15 + 0.85 * cyc)
-      h += (periodicFbm(u, v, 96, 2) - 0.5) * 0.009 * cyc
-      h += (periodicFbm(u, v, 210, 2) - 0.5) * 0.0035 * cyc
+      // Rolling highland relief. Every octave comes from periodicFbm,
+      // which is exactly periodic in u by construction, so the texture
+      // wraps with no seam and — importantly — with no band of missing
+      // detail. (Multiplying these by a seam-fade used to erase a
+      // vertical strip of relief, which read as a hard rectangle.)
+      // Octave frequencies are capped at the Nyquist limit for the
+      // texture width. periodicFbm lays about 2*pi*freq noise cells
+      // around the equator; above width/2 that aliases badly, and the
+      // interference pattern shows up as pinwheel moire on the globe.
+      let h = (periodicFbm(u, v, 5.4, 5) - 0.5) * 0.09
+      h += (periodicFbm(u, v, 17, 3) - 0.5) * 0.03
+      h += (periodicFbm(u, v, 58, 2) - 0.5) * 0.011
 
       // Maria: smooth, low, basalt plains
       const m = mariaAt(u, v)
@@ -321,12 +349,13 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
         h = h * (1 - m * 0.85) + plain * m
       }
 
-      // Craters from the spatial grid, thinned near the wrapping edge
-      const edgeFade = cyclic(u) > 0.06 ? 1 : 0
+      // Craters from the spatial grid. bucketise() already registered
+      // each crater at x, x-W and x+W, so impacts crossing the wrap are
+      // drawn on both edges and need no gating here.
       const gx = Math.floor(x / cell)
       const gy = Math.floor(y / cell)
       const bucket = grid[gy * cols + gx]
-      for (let k = 0; k < bucket.length && edgeFade; k += 2) {
+      for (let k = 0; k < bucket.length; k += 2) {
         const c = craters[bucket[k]]
         const shift = bucket[k + 1]
         h += craterProfile(c, x - c.x - shift, y - c.y)
@@ -341,7 +370,13 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const i = y * W + x
-      const dx = x - tycho.x
+      // The offset must take the short way round the sphere. Without the
+      // wrap, a pixel at x = 0 sees Tycho to its left and the pixel at
+      // x = W-1 sees it far to the right, so the ray angle flips by
+      // ~180 degrees across the seam and the rays do not meet.
+      let dx = x - tycho.x
+      if (dx > W / 2) dx -= W
+      else if (dx < -W / 2) dx += W
       const dy = y - tycho.y
       const dist = Math.sqrt(dx * dx + dy * dy) / tycho.r
       if (dist < 1.2 || dist > 9) continue
@@ -354,7 +389,7 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
       const fall = Math.pow(Math.max(0, 1 - (dist - 1.2) / 7.8), 2.1)
       // Dense, thin filaments rather than a few hard spikes
       const amount = Math.max(0, streak - 0.5) * 1.5 * fall
-      rayMask[i] = Math.min(1, amount) * cyclic(x / W)
+      rayMask[i] = Math.min(1, amount)
     }
   }
 
@@ -386,11 +421,21 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
 
     for (let x = 0; x < W; x++) {
       const i = y * W + x
-      const xL = x > 0 ? x - 1 : x
-      const xR = x < W - 1 ? x + 1 : x
-
+      const u = x / W
+      const v = y / H
       const h = height[i]
-      const gx = height[y * W + xR] - height[y * W + xL]
+
+      // Horizontal gradient with wraparound. The texture is seamless in x,
+      // so the columns either side of the wrap are genuine neighbours. The
+      // previous code clamped to a one-sided difference at x = 0 and x =
+      // W-1, which halved the slope there and lit the first and last
+      // columns differently from everything else — a hard bright/dark line
+      // straight down the front of the moon.
+      const xLw = x > 0 ? x - 1 : W - 1
+      const xRw = x < W - 1 ? x + 1 : 0
+      const gx = height[y * W + xRw] - height[y * W + xLw]
+
+      // Vertical: the poles genuinely are an edge, so clamp there.
       const gy = height[yDn * W + x] - height[yUp * W + x]
 
       // Surface normal from the gradient (bump-map style)
@@ -408,10 +453,17 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
       const m = mareMask[i]
       const ray = rayMask[i]
 
-      // Albedo: blue-silver highlands, darker basalt seas, bright ejecta
-      let base = 0.58 + (fbm(x * 0.03, y * 0.03, 2) - 0.5) * 0.16
+      // Albedo: blue-silver highlands, darker basalt seas, bright ejecta.
+      //
+      // These two layers must be periodic in u like everything else. They
+      // used to be plain fbm() on raw pixel coordinates, which does not
+      // wrap: at x = 0 the noise sat at 0, at x = W it sat at W*0.03, and
+      // the discontinuity showed as a hard vertical line up the front of
+      // the globe. periodicFbm lays its cells around the equator.
+      // (2*pi*freq noise cells per lap, so ~15 cells ⇒ freq 2.4.)
+      let base = 0.58 + (periodicFbm(u, v, 2.4, 2) - 0.5) * 0.16
       // Broad albedo provinces, so the surface is not one flat grey
-      base += (fbm(x * 0.0045 + 5, y * 0.0045 + 2, 3) - 0.5) * 0.22
+      base += (periodicFbm(u, v, 0.38, 3) - 0.5) * 0.22
       base *= 1 - m * 0.6
       base += ray * 0.32
       // Fresh crater floors are slightly brighter
@@ -420,10 +472,15 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
       // Light baked in *lightly*: enough to read the relief in the map
       // itself, but mostly albedo, so the real-time lights stay in charge
       // and the surface is never double-shaded into a flat white disc.
-      let lum = base * (0.7 + lambert * 0.38)
+      // Relief shading. Real Lunar Orbiter imagery gets most of its
+      // legibility from slope, not albedo — a flat mare and a crater wall
+      // are nearly the same colour. We keep albedo in charge (the
+      // real-time lights must not be double-counted) but let the slope
+      // term swing enough to describe the bowls.
+      let lum = base * (0.52 + lambert * 0.72)
 
-      // A touch of ambient occlusion in the deep bowls
-      lum *= 0.94 + Math.min(0.06, h * 0.4)
+      // Ambient occlusion in the bowls, and rim brightening on the crests
+      lum *= 0.88 + Math.min(0.12, h * 0.9)
 
       lum = Math.max(0.02, Math.min(1, lum))
 
@@ -450,7 +507,7 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
 
   const cx = W * 0.25 // front-facing point of the sphere
   const cy = H * 0.5 // equator
-  const fontSize = Math.round(H * 0.088)
+  const fontSize = Math.round(H * 0.062)
   const text = 'JULIET'
 
   const layout = (c, spacing) => {
@@ -460,14 +517,14 @@ export function createMoonTextures({ width = 1024, seed = 20241123 } = {}) {
   }
 
   const setFont = (c, size) => {
-    c.font = `600 ${size}px "Cormorant Garamond", Georgia, "Times New Roman", serif`
+    c.font = `500 ${size}px "Cormorant Garamond", Georgia, "Times New Roman", serif`
     c.textBaseline = 'middle'
     c.textAlign = 'left'
   }
 
   /* Colour map: carved letters — dark recess with a lit lower lip */
   setFont(ctx, fontSize)
-  const spacing = fontSize * 0.26
+  const spacing = fontSize * 0.38
   const { widths, total } = layout(ctx, spacing)
   let px = cx - total / 2
 

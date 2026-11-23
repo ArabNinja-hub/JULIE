@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { createMoonTextures } from '../lib/moonTexture'
@@ -18,10 +18,16 @@ import { createMoonTextures } from '../lib/moonTexture'
 export default function Moon({ isMobile = false, reducedMotion = false }) {
   const meshRef = useRef()
 
+  /* The surface is built at a modest size first, then refined. Generating
+     the full 2048 map takes a couple of seconds of main-thread work; doing
+     that before the first render leaves an empty stage. So we show the
+     1024 version immediately (fast, and already sharp on a phone), then
+     swap in the high-resolution maps once the browser is idle. */
+  const [detail, setDetail] = useState(isMobile ? 'base' : 'base')
+
   const { colorTex, bumpTex } = useMemo(() => {
-    const { colorCanvas, bumpCanvas } = createMoonTextures({
-      width: isMobile ? 1024 : 2048,
-    })
+    const width = detail === 'high' ? 2048 : 1024
+    const { colorCanvas, bumpCanvas } = createMoonTextures({ width })
 
     const colorTex = new THREE.CanvasTexture(colorCanvas)
     colorTex.colorSpace = THREE.SRGBColorSpace
@@ -33,6 +39,28 @@ export default function Moon({ isMobile = false, reducedMotion = false }) {
     bumpTex.wrapS = THREE.RepeatWrapping
 
     return { colorTex, bumpTex }
+  }, [isMobile, detail])
+
+  // Refine to full resolution once the page has settled.
+  useEffect(() => {
+    if (isMobile) return undefined
+    let cancelled = false
+    const start = () => {
+      // A second idle callback would be cleaner still, but this is enough:
+      // by the time the outer one fires the hero has already painted.
+      window.requestIdleCallback?.(
+        () => {
+          if (!cancelled) setDetail('high')
+        },
+        { timeout: 2500 }
+      ) ?? setTimeout(() => {
+        if (!cancelled) setDetail('high')
+      }, 2500)
+    }
+    start()
+    return () => {
+      cancelled = true
+    }
   }, [isMobile])
 
   useEffect(
