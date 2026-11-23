@@ -238,8 +238,8 @@ function craterletField(x, z) {
 function wrinkleRidges(x, z) {
   // Two crossing ridge systems, each with its own orientation
   const systems = [
-    { ang: 0.62, freq: 0.026, phase: 1.7, amp: 2.6 },
-    { ang: -0.38, freq: 0.034, phase: 4.1, amp: 1.9 },
+    { ang: 0.62, freq: 0.026, phase: 1.7, amp: 3.2 },
+    { ang: -0.38, freq: 0.034, phase: 4.1, amp: 2.4 },
   ]
 
   let sum = 0
@@ -271,16 +271,16 @@ function rilles(x, z) {
   const dist = Math.abs(z - pathZ)
 
   // Trough profile: smooth in, flat bottom, smooth out. No creases.
-  const width = 5.4
+  const width = 9
   const t = Math.min(1, dist / width)
   const u = 1 - t
   const trough = u * u * u * (u * (u * 6 - 15) + 10)
 
   // Only present in a limited band, fading smoothly at both ends
-  const band = Math.max(0, 1 - Math.abs(x + 40) / 120)
+  const band = Math.max(0, 1 - Math.abs(x + 40) / 130)
   const fade = band * band * (3 - 2 * band)
 
-  return -trough * 4.2 * fade
+  return -trough * 5.4 * fade
 }
 
 /**
@@ -354,16 +354,32 @@ function terrainHeightCore(x, z) {
   if (ringT > 0) {
     const ramp = smooth(ringT)
 
-    // 4n(1-n) peaks smoothly at n = 0.5 with zero derivative — no crease
-    const n1 = fbm2(x, z, 0.0125, 0.0118, 3, MX)
-    const ridge = 4 * n1 * (1 - n1)
+    // Ridge strength, low-passed.
+    //
+    // fbm2 sums octaves, so its output is near-Gaussian: tightly clustered
+    // around 0.5 with the highest detail barely present in the value. Every
+    // transform of it — 4n(1-n), an exp() bell — produced summits on the
+    // scale of a single mesh quad (1.56 m), which the mesh renders as a
+    // cusp. The fix is not another transform but filtering: sample the
+    // field on a 6 m stencil, which is ~4 quads, and the peaks come out
+    // broader than the mesh can resolve. The eye reads a summit; the
+    // geometry stays smooth.
+    const RS = 3.2
+    const nx0 = fbm2(x - RS, z - RS, 0.0125, 0.0118, 2, MX)
+    const nx1 = fbm2(x + RS, z - RS, 0.0125, 0.0118, 2, MX)
+    const nx2 = fbm2(x - RS, z + RS, 0.0125, 0.0118, 2, MX)
+    const nx3 = fbm2(x + RS, z + RS, 0.0125, 0.0118, 2, MX)
+    const n1 = (nx0 + nx1 + nx2 + nx3) * 0.25
+
+    const c = (n1 - 0.5) * 4.6
+    const ridge = Math.exp(-c * c)
 
     // Peaks and gaps around the ring, so it reads as a range not a wall
     const ang = Math.atan2(z, x)
     const angular =
       0.5 + 0.5 * fbm(Math.cos(ang) * 2.4 + 41, Math.sin(ang) * 2.4 + 9, 3)
 
-    const massif = ridge * 44 * angular + ridge * ridge * 16 * angular
+    const massif = ridge * 46 * angular + ridge * ridge * 14 * angular
     h += ramp * massif
   }
 

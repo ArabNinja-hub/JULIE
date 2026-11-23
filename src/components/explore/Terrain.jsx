@@ -93,7 +93,7 @@ export default function Terrain({ segments = 200 }) {
       <meshStandardMaterial
         vertexColors
         normalMap={normalMap}
-        normalScale={new THREE.Vector2(0.62, 0.62)}
+        normalScale={new THREE.Vector2(0.45, 0.45)}
         roughnessMap={roughnessMap}
         roughness={0.97}
         metalness={0}
