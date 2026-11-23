@@ -535,36 +535,6 @@ export function terrainDetail(x, z) {
   return g1 * 0.55 + g2 * 0.32 + g3 * 0.2 + g4 * 0.1
 }
 
-/**
- * A sparse field of small stones rendered *as geometry*, for the ground
- * immediately around the explorer. Instanced and camera-relative, so it
- * gives the near field real parallax without paying for a dense mesh.
- *
- * Positions are deterministic in world space (not camera space) so the
- * stones stay put as she walks past them.
- */
-export function nearFieldStones(cx, cz, radius, count, seed = 4242) {
-  const out = []
-  const rand = mulberry(seed)
-  for (let i = 0; i < count; i++) {
-    const a = rand() * Math.PI * 2
-    const d = 1.2 + Math.sqrt(rand()) * radius
-    const x = Math.round(cx) + Math.cos(a) * d
-    const z = Math.round(cz) + Math.sin(a) * d
-    const size = 0.04 + Math.pow(rand(), 2.2) * 0.42
-    out.push({
-      x,
-      y: terrainHeight(x, z),
-      z,
-      size,
-      ry: rand() * Math.PI * 2,
-      rx: rand() * 0.9,
-      rz: rand() * 0.9,
-    })
-  }
-  return out
-}
-
 /* ---------- Canvas textures (procedural, no downloads) ---------- */
 
 

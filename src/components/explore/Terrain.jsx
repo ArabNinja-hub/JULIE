@@ -4,7 +4,6 @@ import {
   WORLD,
   terrainHeight,
   terrainColor,
-  terrainDetail,
   makeRegolithNormalTexture,
   makeRegolithRoughnessTexture,
 } from '../../lib/terrain'
