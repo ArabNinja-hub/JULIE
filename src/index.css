@@ -2193,8 +2193,16 @@ main,
 .joystick__dir--r { right: 5px; }
 
 @media (max-width: 767px) {
-  /* Brief/panel sit above the joystick */
-  .brief, .explore-panel { bottom: 4.4rem; }
+  /* Brief/panel must clear the joystick (96px tall, sitting at 0.85rem)
+     and the map toggle. This block previously set bottom: 4.4rem, which
+     pulled the panel back down *over* the joystick and made walking and
+     reading mutually exclusive on a phone. Keep it above both. */
+  .brief,
+  .explore-panel {
+    bottom: 13.4rem;
+  }
+  .brief { max-height: 4.9rem; }
+  .brief--expanded { max-height: 40vh; }
 }
 
 /* ---------- First-visit briefing ---------- */
