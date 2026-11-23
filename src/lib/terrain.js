@@ -288,7 +288,9 @@ function rilles(x, z) {
  * you can see always sits exactly where the shadows say it should.
  */
 export const SUN_DIRECTION = (() => {
-  const v = { x: 95, y: 52, z: 68 }
+  // ~17 degrees above the horizon: low enough that shadows are long and
+  // relief is legible, high enough that nothing is lost to silhouette.
+  const v = { x: 95, y: 30, z: 68 }
   const len = Math.hypot(v.x, v.y, v.z)
   return { x: v.x / len, y: v.y / len, z: v.z / len }
 })()
@@ -397,11 +399,11 @@ export function terrainHeight(x, z) {
  * keeps every crater, rim and slope.
  */
 // Keep these in sync with the spawns in destinations.js
-const PADS = [
-  { x: -78, z: -128 }, // Sea of Tranquility
-  { x: 84, z: -84 }, // Copernicus approach
-  { x: -84, z: 58 }, // Tycho approach
-  { x: 106, z: 164 }, // South pole highlands
+export const PADS = [
+  { x: -50, z: -59 }, // Sea of Tranquility — open mare
+  { x: 118, z: -170 }, // Copernicus — high ground above the crater
+  { x: -77, z: 28 }, // Tycho — clear approach across the plain
+  { x: 158, z: 134 }, // South pole — summit plateau over the basin
 ]
 const PAD_RADIUS = 13
 let padHeights = null
@@ -445,10 +447,12 @@ const lerp = (a, b, t) => a + (b - a) * t
  * Returns [r, g, b] in approximately 0..1 linear albedo.
  */
 export function terrainColor(x, z, slope) {
-  // Base highland regolith — dark, very slightly cool
-  let r = 0.135
-  let g = 0.140
-  let b = 0.152
+  // Base highland regolith — dark, very slightly cool. Warm it a touch:
+  // real regolith is a grey-brown, not a blue-grey, and the cool cast
+  // flattened the surface into one tone under a white sun.
+  let r = 0.146
+  let g = 0.142
+  let b = 0.148
 
   // Broad albedo provinces: real highlands are mottled with brighter
   // crater ejecta and darker patches over many kilometres.
@@ -457,11 +461,14 @@ export function terrainColor(x, z, slope) {
   g += province
   b += province * 0.95
 
-  // Fresh material on steep slopes: slope failure exposes lighter rock
-  const fresh = Math.min(1, Math.pow(slope, 1.4)) * 0.055
+  // Fresh material on steep slopes: slope failure exposes lighter rock.
+  // Crater walls and rims are measurably brighter than the ground they sit
+  // in — it is one of the strongest cues that a surface has relief, and at
+  // 0.055 it was barely present.
+  const fresh = Math.min(1, Math.pow(slope, 1.25)) * 0.062
   r += fresh
   g += fresh
-  b += fresh
+  b += fresh * 1.02
 
   // Maria — dark basalt plains, clearly darker than the highlands
   const mareW = regionWeight(x, z, -100, -100, 55, 95)
@@ -522,11 +529,19 @@ export function terrainColor(x, z, slope) {
     b = lerp(b, 0.062, Math.min(0.85, shadow))
   }
 
-  // Fine granular variation — the regolith is never a flat tone
-  const grain = (fbm(x * 0.06, z * 0.06, 3) - 0.5) * 0.022
-  r += grain
-  g += grain
-  b += grain
+  /* Regolith is patchy at every scale, and the eye uses that patchiness to
+     judge distance and texture. A single 0.022 grain term was too smooth to
+     read: the ground looked like paint. Four bands, each about twice the
+     frequency of the last, and strongest where the mesh can still resolve
+     them. */
+  const patch =
+    (fbm(x * 0.019 + 3, z * 0.019 + 11, 3) - 0.5) * 0.042 +
+    (fbm(x * 0.052 + 19, z * 0.052 + 5, 3) - 0.5) * 0.030 +
+    (fbm(x * 0.135 + 7, z * 0.135 + 23, 2) - 0.5) * 0.020 +
+    (fbm(x * 0.34 + 41, z * 0.34 + 2, 2) - 0.5) * 0.012
+  r += patch
+  g += patch
+  b += patch * 0.96
 
   return [clamp01(r), clamp01(g), clamp01(b)]
 }

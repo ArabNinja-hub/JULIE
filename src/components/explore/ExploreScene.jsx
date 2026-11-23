@@ -18,6 +18,8 @@ function Loading() {
  * cool blue bounce light lifts the shadow side, and a faint lavender rim
  * keeps the palette consistent with the rest of the site.
  */
+const DESTINATION_ORDER = ['tranquility', 'copernicus', 'tycho', 'southpole']
+
 function Scene({
   api,
   onStep,
@@ -27,6 +29,9 @@ function Scene({
   onNearby,
   isMobile,
 }) {
+  // Rocks cluster around whichever destination she is standing in
+  const padIndex = Math.max(0, DESTINATION_ORDER.indexOf(destinationId))
+
   return (
     <>
       <color attach="background" args={['#02030a']} />
@@ -47,9 +52,9 @@ function Scene({
       <ambientLight intensity={0.045} color="#5a6b96" />
 
       <Suspense fallback={<Loading />}>
-        <Terrain segments={isMobile ? 160 : 256} />
-        <Rocks count={isMobile ? 260 : 520} />
-        <Pebbles count={isMobile ? 140 : 260} />
+        <Terrain segments={isMobile ? 224 : 384} />
+        <Rocks count={isMobile ? 420 : 900} focusIndex={padIndex} />
+        <Pebbles count={isMobile ? 260 : 520} />
         <Landmarks
           destinationId={destinationId}
           foundIds={foundLandmarks}

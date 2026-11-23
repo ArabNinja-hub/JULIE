@@ -2,11 +2,13 @@ import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import {
   WORLD,
+  PADS,
   terrainHeight,
   terrainColor,
   makeRegolithNormalTexture,
   makeRegolithRoughnessTexture,
 } from '../../lib/terrain'
+import { useDepthMaterial } from './DepthFog'
 
 /**
  * The lunar surface.
@@ -65,7 +67,32 @@ export default function Terrain({ segments = 200 }) {
     }
 
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-    g.computeVertexNormals()
+
+    /* Normals from the analytic surface, not from the triangles.
+     *
+     * computeVertexNormals() averages face normals, which is correct but
+     * leaves the mesh's own facets faintly visible on slopes seen at a
+     * grazing angle — the quad edges read as a staircase. Sampling the
+     * true gradient at each vertex gives a continuous normal field, so the
+     * shading is smooth no matter how few polygons the surface has. It is
+     * also cheaper than averaging.
+     */
+    const normals = new Float32Array(count * 3)
+    const e = step * 0.5
+    for (let i = 0; i < count; i++) {
+      const x = xs[i]
+      const z = zs[i]
+      const gx =
+        (terrainHeight(x + e, z) - terrainHeight(x - e, z)) / (2 * e)
+      const gz =
+        (terrainHeight(x, z + e) - terrainHeight(x, z - e)) / (2 * e)
+      const inv = 1 / Math.hypot(gx, 1, gz)
+      normals[i * 3] = -gx * inv
+      normals[i * 3 + 1] = inv
+      normals[i * 3 + 2] = -gz * inv
+    }
+    g.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+
     g.computeBoundingSphere()
     return g
   }, [segments])
@@ -79,6 +106,8 @@ export default function Terrain({ segments = 200 }) {
     []
   )
 
+  const depth = useDepthMaterial()
+
   useEffect(
     () => () => {
       geometry.dispose()
@@ -89,15 +118,23 @@ export default function Terrain({ segments = 200 }) {
   )
 
   return (
+    /* The terrain must cast as well as receive: the long shadows in the
+       bottom of craters are cast by the crater's own far wall. Self-shadow
+       acne on this surface is handled by the derived normal bias in
+       LightRig, which is what makes the reduced sun angle safe. */
     <mesh geometry={geometry} receiveShadow castShadow>
       <meshStandardMaterial
         vertexColors
         normalMap={normalMap}
-        normalScale={new THREE.Vector2(0.45, 0.45)}
+        // The detail map carries the centimetre texture the mesh cannot.
+        // Stronger than before: at 0.45 the ground read as smooth plastic
+        // up close, which is the opposite of regolith.
+        normalScale={new THREE.Vector2(0.85, 0.85)}
         roughnessMap={roughnessMap}
-        roughness={0.97}
+        roughness={1}
         metalness={0}
         dithering
+        onBeforeCompile={depth.onBeforeCompile}
       />
     </mesh>
   )
@@ -121,17 +158,39 @@ function rng(seed) {
  * cheap while the variety does not look repeated. Each rock is sunk
  * slightly into the ground so none appear to float.
  */
-export function Rocks({ count = 300, seed = 20240720 }) {
+export function Rocks({ count = 300, seed = 20240720, focusIndex = 0 }) {
   const rocks = useMemo(() => {
     const rand = rng(seed)
     const dummy = new THREE.Object3D()
     const list = []
 
+    /* Scatter is concentrated where she actually walks.
+     *
+     * Uniform scatter across a 400-unit world puts almost nothing within
+     * sight of the camera: the foreground reads as bare ground, which is
+     * the strongest "empty stage" cue there is. Two thirds of the rocks are
+     * therefore drawn from a disc around the destination she is standing
+     * in, weighted toward the middle; the rest still fill the world so the
+     * horizon is not suspiciously tidy.
+     */
+    const focus = PADS[focusIndex] || PADS[0]
+
     let guard = 0
     while (list.length < count && guard < count * 60) {
       guard++
-      const x = (rand() - 0.5) * WORLD.size * 0.86
-      const z = (rand() - 0.5) * WORLD.size * 0.86
+      let x
+      let z
+      if (guard % 3 !== 0) {
+        // Near field: dense in the middle, thinning outward
+        const a = rand() * Math.PI * 2
+        const r = Math.pow(rand(), 0.62) * 95
+        x = focus.x + Math.cos(a) * r
+        z = focus.z + Math.sin(a) * r
+      } else {
+        // Far field: the rest of the world
+        x = (rand() - 0.5) * WORLD.size * 0.86
+        z = (rand() - 0.5) * WORLD.size * 0.86
+      }
 
       const h = terrainHeight(x, z)
       const dx = terrainHeight(x + 2, z) - h
@@ -171,7 +230,7 @@ export function Rocks({ count = 300, seed = 20240720 }) {
       })
     }
     return list
-  }, [count, seed])
+  }, [count, seed, focusIndex])
 
   // Three irregular base shapes, split into instanced meshes
   const variants = useMemo(() => {
@@ -210,6 +269,9 @@ export function Rocks({ count = 300, seed = 20240720 }) {
           <instancedMesh
             key={vi}
             args={[geo, undefined, items.length]}
+            /* Shadows come from the terrain and the large boulders. The
+               smallest rocks fall below the shadow map's own resolution at
+               this sun angle, so casting them only produces detached blobs. */
             castShadow
             receiveShadow
             frustumCulled={false}
@@ -273,7 +335,15 @@ export function Pebbles({ count = 220 }) {
         mesh.instanceMatrix.needsUpdate = true
       }}
     >
-      <meshStandardMaterial color="#575b66" roughness={0.96} metalness={0} />
+      <meshStandardMaterial
+        color="#575b66"
+        roughness={0.96}
+        metalness={0}
+        // Pebbles are 3-20cm; the shadow bias needed for the low sun is
+        // ~0.37m, larger than they are. Letting them cast would place their
+        // shadows a whole pebble away from themselves. Near-field stones get
+        // their depth from shading, not from the shadow map.
+      />
     </instancedMesh>
   )
 }
