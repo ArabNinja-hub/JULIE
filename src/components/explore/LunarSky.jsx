@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { Stars } from '@react-three/drei'
-import { makeEarthTexture } from '../../lib/terrain'
+import { makeEarthTexture, SUN_DIRECTION } from '../../lib/terrain'
 
 /**
  * Deep-space backdrop: a dense starfield that follows the camera (so it
@@ -11,6 +11,7 @@ import { makeEarthTexture } from '../../lib/terrain'
 export default function LunarSky({ isMobile }) {
   const group = useRef()
   const earthGroup = useRef()
+  const sunGroup = useRef()
   const { camera } = useThree()
 
   const earthMap = useMemo(() => {
@@ -26,6 +27,16 @@ export default function LunarSky({ isMobile }) {
     // The star dome travels with the camera — parallax-free infinity
     if (group.current) {
       group.current.position.copy(camera.position)
+    }
+    if (sunGroup.current) {
+      // The Sun sits along exactly the axis the key light shines down, so
+      // every shadow on the ground visibly points away from it. Airless
+      // sky: a hard disc, no halo to speak of.
+      sunGroup.current.position.set(
+        camera.position.x + SUN_DIRECTION.x * 380,
+        camera.position.y + SUN_DIRECTION.y * 380,
+        camera.position.z + SUN_DIRECTION.z * 380
+      )
     }
     if (earthGroup.current) {
       earthGroup.current.rotation.y += delta * 0.06
@@ -50,6 +61,29 @@ export default function LunarSky({ isMobile }) {
           fade
           speed={0.25}
         />
+      </group>
+
+      {/* The Sun. Reflected light is the only light on the Moon, so the
+          disc itself is blindingly bright while the sky stays black. */}
+      <group ref={sunGroup}>
+        <mesh>
+          <sphereGeometry args={[4.2, 24, 16]} />
+          <meshBasicMaterial color="#ffffff" toneMapped={false} fog={false} />
+        </mesh>
+        {/* Barely-there scatter — enough to seat the disc in the sky
+            without pretending there is an atmosphere. */}
+        <mesh scale={2.6}>
+          <sphereGeometry args={[4.2, 20, 12]} />
+          <meshBasicMaterial
+            color="#cfd9ff"
+            transparent
+            opacity={0.05}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+            side={THREE.BackSide}
+            fog={false}
+          />
+        </mesh>
       </group>
 
       {/* Earth — a small blue marble above the horizon */}
