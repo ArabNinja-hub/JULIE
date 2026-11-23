@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
-import { Compass, Map as MapIcon } from 'lucide-react'
+import { Compass, Map as MapIcon, Rocket, ArrowUp, ArrowDown } from 'lucide-react'
 import { DESTINATIONS, LANDMARKS, destinationById } from '../../lib/destinations'
 import { playUiSound } from '../../lib/audio'
 import {
@@ -48,6 +48,8 @@ export default function LunarExperience({
   const [paused, setPaused] = useState(
     typeof document !== 'undefined' ? document.hidden : false
   )
+  const [flying, setFlying] = useState(false)
+  const [altitude, setAltitude] = useState(0)
 
   const destination = destinationById(destinationId)
   const entryRef = useRef(destinationById(initialDestination || DESTINATIONS[0].id))
@@ -96,14 +98,28 @@ export default function LunarExperience({
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [])
 
-  /* ---------- compass updates ---------- */
+  /* ---------- compass + altitude updates ----------
+   * Polled rather than pushed from the render loop: the 3D code should not
+   * know a HUD exists, and 8 updates a second is below the threshold where
+   * a readout looks steppy.
+   */
   useEffect(() => {
     if (!ready) return
     const id = setInterval(() => {
-      if (api.current) setCompass(api.current.getState().yaw)
+      if (!api.current) return
+      const st = api.current.getState()
+      setCompass(st.yaw)
+      setFlying(st.flying)
+      setAltitude(st.alt)
     }, 120)
     return () => clearInterval(id)
   }, [ready])
+
+  const toggleFlight = useCallback(() => {
+    if (!api.current) return
+    api.current.toggleFlight()
+    playUiSound('warp')
+  }, [])
 
   /* ---------- navigation ---------- */
   const travelTo = useCallback(
@@ -201,6 +217,7 @@ export default function LunarExperience({
             onNearby={handleNearby}
             onStep={() => playUiSound('step')}
             paused={paused}
+            flying={flying}
           />
         </Suspense>
       </div>
@@ -256,6 +273,50 @@ export default function LunarExperience({
         <Joystick onMove={(x, y) => api.current && api.current.setMove(x, y)} />
       )}
 
+      {/* Flight control — the same button on every device, because lifting
+          off is the one action a first-time visitor should not have to
+          discover a keyboard shortcut for. */}
+      <div className="flight-ctl">
+        <button
+          className={`flight-ctl__toggle${flying ? ' is-flying' : ''}`}
+          onClick={toggleFlight}
+          aria-pressed={flying}
+          aria-label={flying ? 'Land' : 'Lift off'}
+        >
+          <Rocket size={15} strokeWidth={1.7} />
+          <span>{flying ? 'Land' : 'Lift off'}</span>
+        </button>
+
+        {flying && (
+          <div className="flight-ctl__alt">
+            <div className="flight-ctl__readout">
+              <span className="flight-ctl__value">{Math.round(altitude)}</span>
+              <span className="flight-ctl__unit">m up</span>
+            </div>
+            {/* Hold to climb or descend — the same axis the keyboard
+                drives, so touch and keys share one behaviour. */}
+            <button
+              className="flight-ctl__axis"
+              onPointerDown={() => api.current?.setFlyAxis(1)}
+              onPointerUp={() => api.current?.setFlyAxis(0)}
+              onPointerLeave={() => api.current?.setFlyAxis(0)}
+              aria-label="Climb"
+            >
+              <ArrowUp size={16} strokeWidth={1.9} />
+            </button>
+            <button
+              className="flight-ctl__axis"
+              onPointerDown={() => api.current?.setFlyAxis(-1)}
+              onPointerUp={() => api.current?.setFlyAxis(0)}
+              onPointerLeave={() => api.current?.setFlyAxis(0)}
+              aria-label="Descend"
+            >
+              <ArrowDown size={16} strokeWidth={1.9} />
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Proximity prompt */}
       {nearby && !activeLandmark && (
         <button
@@ -282,13 +343,13 @@ export default function LunarExperience({
             <h2>The Moon is yours to walk</h2>
             <p>
               {isMobile
-                ? 'Use the joystick to walk and drag anywhere to look around. Tap the glowing beacons to log a discovery.'
-                : 'Move with W A S D or the arrow keys. Drag to look around. Click the glowing beacons to log discoveries, and press M for the lunar map.'}
+                ? 'Use the joystick to walk and drag anywhere to look around. Hold Lift to rise above the surface and see the whole landscape from the air.'
+                : 'Move with W A S D or the arrow keys. Drag to look around. Press F to lift off, then Space and Shift to climb and descend. Press M for the lunar map.'}
             </p>
             <div className="explore-intro__marks">
               <span>{isMobile ? 'Joystick' : 'WASD'}</span>
+              <span>{isMobile ? 'Hold Lift' : 'F to fly'}</span>
               <span>Drag to look</span>
-              <span>Tap beacons</span>
               <span>Esc to exit</span>
             </div>
             <button

@@ -140,6 +140,89 @@ export default function Terrain({ segments = 200 }) {
   )
 }
 
+
+/* ---------------- Distant basin ----------------
+ *
+ * Flying up exposes the edge of a 400 m world. At 140 m, the horizon is
+ * ~280 m away — right where the mesh stops — so without something out
+ * there, the "moon" is a floating island against black sky.
+ *
+ * This is an annulus from the edge of the detailed world out to 1.6 km,
+ * carrying only the kilometre-scale relief. It has no shadows, no detail
+ * maps and no vertex colours beyond the base albedo: at that distance the
+ * surface is a silhouette, and every pixel spent on texture out here is a
+ * pixel wasted.
+ */
+export function DistantBasin({
+  inner = 200,
+  outer = 1600,
+  segments = 96,
+  rings = 44,
+  /* Sink the basin below the detailed mesh.
+   *
+   * The detailed world is a square 400 units across, so its corners reach
+   * 283 from the centre — further than the annulus can start without
+   * overlapping it. Two surfaces evaluating the same height function in
+   * the same place do not blend, they z-fight: a flickering mess of
+   * triangles exactly where you are looking down from altitude.
+   *
+   * Dropping the basin 1.5 m makes it unambiguously the lower surface. The
+   * step at the boundary is concealed by the mountain ring that already
+   * encircles the world.
+   */
+  sink = 1.5,
+}) {
+  const geometry = useMemo(() => {
+    // Build in polar coordinates: rings × segments, stitched as quads.
+    const verts = []
+    const idx = []
+    const stepR = (outer - inner) / rings
+
+    for (let r = 0; r <= rings; r++) {
+      // Radius grows geometrically so the outer ring is not starved of
+      // resolution while the near ring is over-detailed.
+      const t = r / rings
+      const radius = inner * Math.pow(outer / inner, t)
+      for (let a = 0; a <= segments; a++) {
+        const ang = (a / segments) * Math.PI * 2
+        const x = Math.cos(ang) * radius
+        const z = Math.sin(ang) * radius
+        verts.push(x, terrainHeight(x, z) - sink, z)
+      }
+    }
+
+    const row = segments + 1
+    for (let r = 0; r < rings; r++) {
+      for (let a = 0; a < segments; a++) {
+        const i0 = r * row + a
+        const i1 = i0 + 1
+        const i2 = i0 + row
+        const i3 = i2 + 1
+        idx.push(i0, i2, i1, i1, i2, i3)
+      }
+    }
+
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+    g.setIndex(idx)
+    g.computeVertexNormals()
+    g.computeBoundingSphere()
+    return g
+  }, [inner, outer, segments, rings, sink])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  /* The far surface is unlit by the detail that matters up close, so it is
+     given a deliberately flat material. Fog handles it fading to the sky;
+     a standard material here would cost shadow lookups on a million
+     far-away triangles for no visible gain. */
+  return (
+    <mesh geometry={geometry} position={[0, 0, 0]}>
+      <meshLambertMaterial color="#3a3d46" />
+    </mesh>
+  )
+}
+
 /* ---------------- Scattered rocks & boulders ---------------- */
 
 function rng(seed) {

@@ -40,11 +40,12 @@ function shadowNormalBias(extent, mapSize) {
  *   • The sun's shadow camera follows the explorer, so shadow resolution
  *     stays tight anywhere in the 400-unit world.
  */
-export default function LightRig({ isMobile }) {
+export default function LightRig({ isMobile, flying = false }) {
   const sun = useRef()
   const target = useRef()
   const follower = useRef()
   const { scene, camera } = useThree()
+  const wide = useRef(false)
 
   useEffect(() => {
     if (sun.current && target.current) {
@@ -57,6 +58,20 @@ export default function LightRig({ isMobile }) {
   }, [scene])
 
   useFrame(() => {
+    // Re-apply the shadow frustum when entering or leaving flight. Cheap
+    // (a handful of matrix updates) and only happens on transition.
+    if (wide.current !== flying && sun.current) {
+      wide.current = flying
+      const c = sun.current.shadow.camera
+      c.left = -extent
+      c.right = extent
+      c.top = extent
+      c.bottom = -extent
+      c.updateProjectionMatrix()
+      sun.current.shadow.normalBias = normalBias
+      sun.current.shadow.needsUpdate = true
+    }
+
     // Keep the shadow frustum centred on the explorer
     if (target.current) {
       target.current.position.set(camera.position.x, 0, camera.position.z)
@@ -77,11 +92,19 @@ export default function LightRig({ isMobile }) {
     }
   })
 
+  /* Shadow extent adapts to context.
+   *
+   * On foot, a tight frustum is what makes shadows sharp: ±72 m puts 2048
+   * texels across 144 m, about 7 cm each. From altitude, that same setting
+   * covers a postage stamp of ground and the rest of the landscape is
+   * unshadowed, with a hard edge where the frustum stops.
+   *
+   * Widening it while airborne trades resolution for coverage — and because
+   * the bias is derived from the extent, it widens automatically with it,
+   * so the shadow acne fix survives the change.
+   */
   const size = isMobile ? 1024 : 2048
-  // A tighter shadow frustum is the cheapest accuracy win available: halving
-  // the extent quarters the texel area, so shadows are sharper AND the
-  // required bias drops.
-  const extent = isMobile ? 58 : 72
+  const extent = flying ? (isMobile ? 150 : 230) : isMobile ? 58 : 72
   const normalBias = shadowNormalBias(extent, size)
 
   return (

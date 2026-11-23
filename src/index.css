@@ -2927,3 +2927,151 @@ main,
     animation: none;
   }
 }
+
+/* ---------- Flight control ----------
+ * Sits opposite the map toggle so the two never collide, and uses the same
+ * glass treatment as the rest of the HUD — flight is part of the
+ * exploration, not a separate mode bolted on.
+ */
+
+.flight-ctl {
+  position: absolute;
+  left: 1.1rem;
+  bottom: 1.1rem;
+  z-index: 14;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.flight-ctl__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.65rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(183, 169, 232, 0.28);
+  background: rgba(8, 11, 22, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--silver);
+  font-family: var(--sans);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: border-color 0.25s ease, background 0.25s ease, transform 0.15s ease;
+}
+
+.flight-ctl__toggle:hover {
+  border-color: rgba(183, 169, 232, 0.55);
+  background: rgba(14, 19, 34, 0.9);
+}
+
+.flight-ctl__toggle:active { transform: scale(0.97); }
+
+.flight-ctl__toggle:focus-visible {
+  outline: 2px solid rgba(183, 169, 232, 0.8);
+  outline-offset: 2px;
+}
+
+/* Airborne: the control reads as active without shouting. */
+.flight-ctl__toggle.is-flying {
+  border-color: rgba(167, 139, 250, 0.6);
+  background: rgba(28, 22, 48, 0.85);
+  color: #d8ccff;
+}
+
+.flight-ctl__alt {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(183, 169, 232, 0.2);
+  background: rgba(8, 11, 22, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: flight-fade-in 0.3s ease both;
+}
+
+@keyframes flight-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.flight-ctl__readout {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  font-family: var(--mono, var(--sans));
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tabular figures keep the digits from shifting as the number changes,
+   which otherwise makes the readout jitter while climbing. */
+.flight-ctl__value {
+  color: #e8e2ff;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  min-width: 2.2ch;
+  text-align: right;
+}
+
+.flight-ctl__unit {
+  color: rgba(197, 190, 224, 0.55);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.flight-ctl__axis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(183, 169, 232, 0.22);
+  background: rgba(20, 26, 44, 0.75);
+  color: var(--silver);
+  cursor: pointer;
+  touch-action: none;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.flight-ctl__axis:hover {
+  border-color: rgba(183, 169, 232, 0.5);
+  background: rgba(30, 38, 62, 0.9);
+}
+
+.flight-ctl__axis:active {
+  background: rgba(52, 42, 84, 0.95);
+  border-color: rgba(167, 139, 250, 0.6);
+}
+
+.flight-ctl__axis:focus-visible {
+  outline: 2px solid rgba(183, 169, 232, 0.8);
+  outline-offset: 2px;
+}
+
+/* Mobile: the joystick owns the bottom-left, so flight moves up out of its
+   way rather than overlapping the control she steers with. */
+@media (max-width: 767px) {
+  .flight-ctl {
+    left: 0.7rem;
+    bottom: 12.2rem;
+  }
+
+  .flight-ctl__toggle {
+    padding: 0.55rem 0.85rem;
+    font-size: 0.65rem;
+  }
+}
+
+/* Respect the OS-level motion preference: the idle sway and breathing are
+   exactly the kind of gentle continuous motion that setting exists for. */
+@media (prefers-reduced-motion: reduce) {
+  .flight-ctl__alt { animation: none; }
+  .flight-ctl__toggle { transition: none; }
+}

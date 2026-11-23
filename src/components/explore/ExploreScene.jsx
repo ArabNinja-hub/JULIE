@@ -1,11 +1,14 @@
 import { Suspense } from 'react'
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
-import Terrain, { Rocks, Pebbles } from './Terrain'
+import Terrain, { Rocks, Pebbles, DistantBasin } from './Terrain'
 import LightRig from './LightRig'
 import FirstPersonControls from './FirstPersonControls'
 import Landmarks from './Landmarks'
 import LunarSky from './LunarSky'
+import SunShafts from './SunShafts'
+import Immersion from './Immersion'
+import AdaptiveFov from './AdaptiveFov'
 
 function Loading() {
   return null
@@ -28,6 +31,8 @@ function Scene({
   onSelectLandmark,
   onNearby,
   isMobile,
+  flying,
+  paused,
 }) {
   // Rocks cluster around whichever destination she is standing in
   const padIndex = Math.max(0, DESTINATION_ORDER.indexOf(destinationId))
@@ -42,10 +47,23 @@ function Scene({
         whisper of fog keeps the far edge of the world from looking like
         a hard cut, and it is pushed far back.
       */}
-      <fog attach="fog" args={['#050814', 260, 620]} />
+      {/* 
+        There is no atmosphere on the Moon, so there is no aerial haze —
+        distant terrain stays almost as crisp as near terrain. The fog here
+        is doing a specific job rather than atmospheric: it dissolves the
+        outer rim of the distant basin so the world has no visible edge.
+        
+        It previously ended at 620 m, which was fine while the world was
+        400 m across — but from flight altitude the basin reaches 1600 m,
+        and anything past 620 m was rendered at exactly the fog colour. The
+        horizon became a flat band. Pushed out so the basin is still
+        readable at its own scale, while the final few hundred metres still
+        fade rather than cutting.
+      */}
+      <fog attach="fog" args={['#050814', 420, 1750]} />
 
       {/* Hard low sun + a trace of earthshine */}
-      <LightRig isMobile={isMobile} />
+      <LightRig isMobile={isMobile} flying={flying} />
 
       {/* A very faint ambient floor so nothing is pure #000 — real
           shadowed regolith still catches starlight and earthshine. */}
@@ -53,6 +71,8 @@ function Scene({
 
       <Suspense fallback={<Loading />}>
         <Terrain segments={isMobile ? 224 : 384} />
+        {/* Beyond the detailed world: the horizon must not end at 200m */}
+        <DistantBasin />
         <Rocks count={isMobile ? 420 : 900} focusIndex={padIndex} />
         <Pebbles count={isMobile ? 260 : 520} />
         <Landmarks
@@ -62,9 +82,23 @@ function Scene({
           onNearby={onNearby}
         />
         <LunarSky isMobile={isMobile} />
+        <SunShafts />
       </Suspense>
 
       <FirstPersonControls api={api} onStep={onStep} isMobile={isMobile} />
+
+      {/* Order here is load-bearing.
+       *
+       * R3F sorts useFrame subscriptions by priority, then runs equal
+       * priorities in mount order. The controls write camera.position and
+       * camera.rotation outright every frame, so anything that adds to
+       * the camera must be mounted *after* them or its contribution is
+       * overwritten before the frame is drawn. Mounted the other way
+       * round, Immersion's sway and breathing were computed every frame
+       * and then silently erased — an invisible bug, not a crash.
+       */}
+      <Immersion enabled={!paused} flying={flying} />
+      <AdaptiveFov isMobile={isMobile} />
     </>
   )
 }
@@ -79,7 +113,7 @@ export default function ExploreScene(props) {
         position: [0, 3, 0],
         fov: props.isMobile ? 78 : 68,
         near: 0.1,
-        far: 700,
+        far: 2400,
       }}
       gl={{
         antialias: !props.isMobile,
