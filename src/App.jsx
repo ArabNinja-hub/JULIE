@@ -72,10 +72,15 @@ export default function App() {
       <Starfield paused={exploring} />
       <div className="nebula" aria-hidden="true" />
 
+      {/* First stop in the tab order: jump past the navigation. */}
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
+
       <Navbar onExplore={() => openExplore()} />
       <MusicPlayer />
 
-      <main>
+      <main id="main">
         <Hero
           isMobile={isMobile}
           onEnter={enterUniverse}
