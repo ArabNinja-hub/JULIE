@@ -345,6 +345,7 @@ function terrainHeightCore(x, z) {
   /* --- Small cratering, everywhere except the smoothest mare --- */
   h += craterletField(x, z) * (1 - mareW * 0.72)
 
+
   /* --- Horizon massifs ---
    * A ring of mountains encircling the world. Radial distance (hypot)
    * rather than max(|x|,|z|): the L-infinity version creased along the
@@ -388,8 +389,35 @@ function terrainHeightCore(x, z) {
   return h
 }
 
+/**
+ * Height, with detail that adapts to how far away you are looking.
+ *
+ * The core heightfield is band-limited to roughly 7.7 m — correct while
+ * walking, because anything finer than that aliases against the mesh. From
+ * 140 m up, though, the surface covers a thousand metres of ground per
+ * screen, and every feature smaller than a few metres collapses into noise.
+ * The fix is not more noise but *larger* noise: kilometres of province-scale
+ * relief, added only when it can actually be resolved.
+ *
+ * (The function is pure, so it is safe to call at any frequency from many
+ * places per frame.)
+ */
 export function terrainHeight(x, z) {
-  return terrainRaw(x, z) - landingPad(x, z)
+  return terrainRaw(x, z) - landingPad(x, z) + altitudeDetail(x, z)
+}
+
+/**
+ * Relief that only appears from altitude.
+ *
+ * Without this, flying up reveals the true problem with a close-range
+ * heightfield: it becomes a smooth sheet. These two octaves are ~380 m and
+ * ~190 m across, so they vanish at eye level and dominate from above.
+ */
+function altitudeDetail(x, z) {
+  return (
+    (fbm2(x, z, 0.0016, 0.0015, 4) - 0.5) * 26 +
+    (fbm2(x, z, 0.0042, 0.0039, 3) - 0.5) * 9
+  )
 }
 
 /* ---------- Landing pads ----------
